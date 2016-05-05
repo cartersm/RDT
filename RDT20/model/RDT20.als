@@ -12,7 +12,8 @@ sig State {
 	recvBuffer: set Data,
 	channel: Packet->Data,
 	channelChecksum: lone Checksum,
-	feedback: lone Packet
+	feedback: lone Packet,
+	sentData: lone Data
 }
 
 sig Data {}
@@ -34,6 +35,7 @@ pred State.init {
 	no this.channel
 	no this.channelChecksum
 	this.feedback = ACK
+	no this.sentData
 }
 
 pred transition[s, s': State] {
@@ -46,7 +48,15 @@ pred transition[s, s': State] {
 			s'.sendBuffer = s.sendBuffer and
 			no s'.channel and
 			no s'.channelChecksum and
-			s'.feedback = ACK
+			s'.feedback = ACK and
+			s'.sentData = s.sentData
+		) else (
+			s'.recvBuffer = s.recvBuffer and
+			s'.sendBuffer = s.sendBuffer and
+			no s'.channel and
+			no s'.channelChecksum and
+			s'.feedback = NAK and
+			s'.sentData = s.sentData
 		)
 	)
 	//if there's nothing in the channel and feedback is ACK
@@ -56,7 +66,14 @@ pred transition[s, s': State] {
 			s'.sendBuffer = s.sendBuffer - d and
 			s'.recvBuffer = s.recvBuffer and
 			make_pkt[s', d] and
-			no s'.feedback
+			no s'.feedback and
+			s'.sentData = d
+	) else s.feedback = NAK => (
+		s'.sendBuffer = s.sendBuffer and
+		s'.recvBuffer = s.recvBuffer and
+		make_pkt[s', s.sentData] and
+		no s'.feedback and
+		s'.sentData = s.sentData
 	)
 }
 
@@ -65,7 +82,7 @@ fact Trace {
 	all s: State - last |
 		let s' = s.next |
 			(not s.finished and transition[s, s']) or
-			(s.finished	and s'.finished)		
+			(s.finished	and s'.finished and s.sentData = s'.sentData)		
 }
 
 pred State.finished {
@@ -78,7 +95,10 @@ pred State.finished {
 pred make_pkt[s: State, d: Data] {
 	one p: Packet |
 	(
-		s.channel = p->d and
+		(	
+			s.channel = p->d or
+			one b: BadData | s.channel = p->b
+		) and
 		one c: Checksum | (
 			c.data = d and
 			s.channelChecksum = c
